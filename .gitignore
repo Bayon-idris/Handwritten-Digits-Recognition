@@ -16,9 +16,6 @@ data/raw/
 data/processed/
 data/test/
 
-# Models and results
-models/
-results/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
