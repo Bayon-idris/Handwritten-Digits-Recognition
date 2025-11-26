@@ -1,91 +1,138 @@
-import os
 import numpy as np
-from PIL import Image
+from sklearn.model_selection import train_test_split
+
 from models.train_model import BPNetwork
-from src.preprocessing import ImagePreprocessor
-import sys
+from src.preprocessing import ImageManager, ImagePreprocessor
 
 
-def load_processed_images(processed_dir="data/processed"):
-    feature_vectors = []
-    labels = []
+def prepare_data_splits(X, y, train_ratio=0.7, val_ratio=0.15):
+    """
+    Args:
+        X: Features (n_samples × 256)
+        y: Labels (n_samples,)
+        train_ratio: Ratio d'entraînement (0.7 = 70%)
+        val_ratio: Ratio de validation (0.15 = 15%)
 
-    for digit in sorted(os.listdir(processed_dir)):
-        digit_path = os.path.join(processed_dir, digit)
-        if not os.path.isdir(digit_path):
-            continue
+    Returns:
+        X_train, Y_train, X_val, Y_val, X_test, Y_test
+        (toutes les matrices sont transposées pour le BP network)
+    """
+    # Convertir labels en one-hot encoding
+    Y = np.eye(10)[y].T
+    X = X.T
 
-        for img_file in os.listdir(digit_path):
-            if not img_file.lower().endswith((".png", ".jpg", ".jpeg")):
-                continue
-            img_path = os.path.join(digit_path, img_file)
-            img = Image.open(img_path).convert("L")
-            vec = np.array(img).flatten() / 255.0 
-            feature_vectors.append(vec)
-            labels.append(int(digit))
+    # Split: train / (val + test)
+    X_train, X_temp, Y_train, Y_temp = train_test_split(
+        X.T, Y.T, train_size=train_ratio, random_state=42, stratify=y
+    )
 
-    return np.array(feature_vectors), np.array(labels)
+    # Split: val / test
+    val_size = val_ratio / (1 - train_ratio)
+    X_val, X_test, Y_val, Y_test = train_test_split(
+        X_temp,
+        Y_temp,
+        train_size=val_size,
+        random_state=42,
+        stratify=np.argmax(Y_temp, axis=1),
+    )
 
+    # Transposer pour BP network (features × samples)
+    X_train, Y_train = X_train.T, Y_train.T
+    X_val, Y_val = X_val.T, Y_val.T
+    X_test, Y_test = X_test.T, Y_test.T
 
-def preprocess_dataset(raw_dir, processed_dir):
-    if not os.path.exists(processed_dir) or not any(os.scandir(processed_dir)):
-        pre = ImagePreprocessor(raw_dir, processed_dir)
-        print("Preprocessing all images...")
-        X, y = pre.process_all()
-        print("Preprocessing completed!")
-    else:
-        print("Loading preprocessed images...")
-        X, y = load_processed_images(processed_dir)
-        print("Loading completed!")
+    print(f"\n{'='*60}")
+    print(f"DATA SPLITS")
+    print(f"{'='*60}")
+    print(f"Training:   {X_train.shape[1]} samples ({train_ratio*100:.0f}%)")
+    print(f"Validation: {X_val.shape[1]} samples ({val_ratio*100:.0f}%)")
+    print(
+        f"Testing:    {X_test.shape[1]} samples ({(1-train_ratio-val_ratio)*100:.0f}%)"
+    )
 
-    print("Matrix X (feature vectors):", X.shape)
-    print("Vector y (labels):", y.shape)
-    return X, y
+    return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
 
 def main():
-    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    """
+    Pipeline complet d'entraînement et d'évaluation
+    """
+    print("\n" + "=" * 60)
+    print("HANDWRITTEN DIGIT RECOGNITION")
+    print("BP NEURAL NETWORK IMPLEMENTATION")
+    print("=" * 60)
 
-    PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-    RAW_DIR = os.path.join(PROJECT_DIR, "data", "raw")
-    PROCESSED_DIR = os.path.join(PROJECT_DIR, "data", "processed")
+    print("\n[1/6] Preprocessing images...")
+    preprocessor = ImagePreprocessor(raw_dir="data/raw", processed_dir="data/processed")
+    X, y = preprocessor.process_all()
 
-    # 1️⃣ Prétraitement et chargement
-    X, y = preprocess_dataset(RAW_DIR, PROCESSED_DIR)
+    # ============================================================
+    # 2. SPLIT DES DONNÉES
+    # ============================================================
+    print("\n[2/6] Splitting data...")
+    X_train, Y_train, X_val, Y_val, X_test, Y_test = prepare_data_splits(X, y)
 
-    # 2️⃣ Préparation des données
-    m = X.T 
-    num_samples = X.shape[0]
-    num_digits = 10
-    target = np.zeros((num_digits, num_samples))
-    for i in range(num_samples):
-        target[y[i], i] = 1
+    # ============================================================
+    # 3. CRÉATION ET ENTRAÎNEMENT DU MODÈLE
+    # ============================================================
+    print("\n[3/6] Training model...")
+    model = BPNetwork(
+        input_size=256,  # 16×16 images
+        hidden_size=25,  # Hidden layer nodes
+        output_size=10,  # 10 digits (0-9)
+        lr=0.1,  # Learning rate
+        epochs=1000,  # Training epochs
+    )
 
-    # 3️⃣ Entraînement du réseau BP
-    print(f"\nTraining BP network on entire dataset ({num_samples} samples)...")
-    # bp = BPNetwork(input_size=256, hidden_size=25, output_size=10, lr=0.5, epochs=1000)
-    bp = BPNetwork(input_size=256,hidden_size=64,output_size=10,lr=0.1,epochs=3000)
+    model.train(X_train, Y_train, X_val, Y_val)
 
-    bp.train(m, target)
-    print("Training completed!\n")
+    # ============================================================
+    # 4. COURBES D'APPRENTISSAGE
+    # ============================================================
+    print("\n[4/6] Generating learning curves...")
+    model.plot_learning_curves()
 
-    # 4️⃣ Test d’une image externe
-    print("\nNow you can test the trained BP network with your own handwritten digit image.")
-    print("Enter the path to your image (e.g., C:\\Users\\idrisdd\\Downloads\\digit.png):")
+    # ============================================================
+    # 5. ÉVALUATION SUR L'ENSEMBLE DE TEST
+    # ============================================================
+    print("\n[5/6] Evaluating on test set...")
+    test_acc, cm = model.evaluate_test_set(X_test, Y_test)
 
-    img_path = input("Image path: ").strip()
-    test_img_path = os.path.expanduser(img_path)
-    if not os.path.isabs(test_img_path):
-        test_img_path = os.path.join(RAW_DIR, img_path)
+    # ============================================================
+    # 6. TEST SUR LES 10 IMAGES PRÉDÉFINIES
+    # ============================================================
+    print("\n[6/6] Testing on predefined images...")
+    test_manager = ImageManager(test_images_dir="data/test")
 
-    if not os.path.exists(test_img_path):
-        print("❌ Image not found! Please check the path.")
-        return
+    try:
+        results, predefined_acc = test_manager.test_and_visualize(model, preprocessor)
+        print(f"\n🎉 Predefined Images Accuracy: {predefined_acc:.2f}%")
+    except FileNotFoundError as e:
+        print(f"\n⚠️  {e}")
+        print("\nTo test with predefined images:")
+        print("  1. Create: data/test/")
+        print("  2. Add: 0.png, 1.png, ..., 9.png")
 
-    pre = ImagePreprocessor(RAW_DIR, PROCESSED_DIR)
-    vec_single = pre.process_single_image(test_img_path)
-    pred_single = bp.predict(vec_single.reshape(256, 1))
-    print(f"✅ Predicted digit for {os.path.basename(test_img_path)}: {pred_single[0]}")
+    # ============================================================
+    # RÉSUMÉ FINAL
+    # ============================================================
+    print(f"\n{'='*60}")
+    print(f"✓ ALL RESULTS SAVED IN 'results/'")
+    print(f"{'='*60}")
+    print(f"\nGenerated files:")
+    print(f"  📊 learning_curves.png          - Training/validation curves")
+    print(f"  📊 confusion_matrix.png         - Confusion matrix heatmap")
+    print(f"  📊 prediction_examples.png      - Example predictions")
+    print(f"  📊 test_results_detailed.png    - 10 test images visualization")
+    print(f"  📄 classification_report.txt    - Detailed metrics")
+    print(f"  📄 test_results.txt             - Test results summary")
+    print(f"\nMetrics:")
+    print(f"  • Test Set Accuracy: {test_acc*100:.2f}%")
+    try:
+        print(f"  • Predefined Images: {predefined_acc:.2f}%")
+    except:
+        pass
+    print(f"{'='*60}\n")
 
 
 if __name__ == "__main__":
