@@ -66,7 +66,7 @@ def main():
     preprocessor = ImagePreprocessor(raw_dir="data/raw", processed_dir="data/processed")
     X, y = preprocessor.process_all()
 
-    # ============================================================
+    # =========A===================================================
     # 2. SPLIT DES DONNÉES
     # ============================================================
     print("\n[2/6] Splitting data...")
@@ -98,10 +98,41 @@ def main():
     print("\n[5/6] Evaluating on test set...")
     test_acc, cm = model.evaluate_test_set(X_test, Y_test)
 
+       # ============================================================
+    # 6. KDD PIPELINE (Transformation + Mining + Insights)
     # ============================================================
-    # 6. TEST SUR LES 10 IMAGES PRÉDÉFINIES
+    print("\n[6/6] Running KDDM Pipeline...")
+    from src.kdd_pipeline import KDDPipeline
+
+    kdd = KDDPipeline()
+
+    # --- Data Selection ---
+    kdd.data_selection(X, y)
+
+    # --- PCA & t-SNE Transformations ---
+    X_flat = X  # original shape: (n_samples, 256)
+    kdd.compute_pca(X_flat, y)
+    kdd.compute_tsne(X_flat, y)
+
+    # --- Additional Models (SVM, Random Forest) ---
+    bp_final_acc = test_acc * 100
+
+    svm_acc = kdd.train_svm(X_train.T, np.argmax(Y_train.T, axis=1),
+                            X_test.T, np.argmax(Y_test.T, axis=1))
+
+    rf_acc = kdd.train_random_forest(X_train.T, np.argmax(Y_train.T, axis=1),
+                                     X_test.T, np.argmax(Y_test.T, axis=1))
+
+    # --- Summary ---
+    kdd.summarize_models(bp_final_acc, svm_acc * 100, rf_acc * 100)
+
+    print("\n🎉 KDD Pipeline Completed! All results saved in results/kdd")
+
+        # ============================================================
+    # 7. TEST SUR LES IMAGES PRÉDÉFINIES (0-9)
     # ============================================================
-    print("\n[6/6] Testing on predefined images...")
+    print("\n[7] Testing on predefined images...")
+
     test_manager = ImageManager(test_images_dir="data/test")
 
     try:
@@ -112,13 +143,15 @@ def main():
         print("\nTo test with predefined images:")
         print("  1. Create: data/test/")
         print("  2. Add: 0.png, 1.png, ..., 9.png")
+        predefined_acc = None
+
 
     # ============================================================
     # RÉSUMÉ FINAL
     # ============================================================
     print(f"\n{'='*60}")
     print(f"✓ ALL RESULTS SAVED IN 'results/'")
-    print(f"{'='*60}")
+    print(f"{'='*60}") 
     print(f"\nGenerated files:")
     print(f"  📊 learning_curves.png          - Training/validation curves")
     print(f"  📊 confusion_matrix.png         - Confusion matrix heatmap")
